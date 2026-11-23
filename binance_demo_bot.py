@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Binance DEMO (paper trading) botu - sanal 1000 USDT ile. AGRESİF MOD.
+Binance DEMO (paper trading) botu - sanal 1000 USDT ile. Profiller: sakin / agresif.
 GERÇEK EMİR GÖNDERMEZ. API anahtarı gerektirmez; sadece Binance'in
 herkese açık fiyat verisini (klines) okur.
 
@@ -15,28 +15,43 @@ import argparse, csv, json, math, os, sys, time, urllib.request, urllib.parse
 from datetime import datetime, timezone
 
 # ------------------------------------------------------------------ AYARLAR
-CONFIG = {
+BASE = {
     "start_balance": 1000.0,          # sanal USDT
-    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-                "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "ADAUSDT"],
-    "interval": "15m",                # agresif mod: 15 dakikalık mumlar
     "fee": 0.001,                     # Binance spot %0.1 (her işlem)
     "slippage": 0.0005,               # %0.05 kayma varsayımı
-    "risk_per_trade": 0.03,           # agresif: işlem başı sermayenin %3'ü riske edilir
-    "max_position_pct": 0.50,         # tek coine en fazla sermayenin %50'si
-    "max_open_positions": 4,
     "atr_stop_mult": 2.0,             # ilk stop = giriş - 2*ATR
-    "atr_trail_mult": 2.5,            # trend işlemlerinde iz süren stop
     "breakout_len": 20,               # Donchian kırılım periyodu
-    "rsi_oversold": 33,
     "bounce_target_atr": 2.0,
-    "bounce_max_bars": 16,            # tepki alımında en fazla 16 mum (4 saat) tut
-    "bounce_risk_mult": 0.75,
-    "dd_brake": 0.15,                 # zirveden %15 düşüşte risk yarıya iner
-    "dd_halt": 0.30,                  # zirveden %30 düşüşte 3 gün yeni işlem açılmaz
     "state_file": "demo_state.json",
     "trades_file": "demo_trades.csv",
 }
+PROFILES = {
+    # SAKİN: 4 saatlik mumlar, sadece boğa rejiminde trend alımı, az işlem
+    "sakin": {
+        "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
+        "interval": "4h", "risk_per_trade": 0.015, "max_position_pct": 0.35,
+        "max_open_positions": 3, "atr_trail_mult": 3.0, "rsi_oversold": 25,
+        "bounce_max_bars": 12, "bounce_risk_mult": 0.5, "bounce_body": 0.5,
+        "require_bull": True, "dd_brake": 0.10, "dd_halt": 0.20, "halt_days": 7,
+    },
+    # AGRESİF: 15 dakikalık mumlar, her rejimde alım, çok işlem
+    "agresif": {
+        "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+                    "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "ADAUSDT"],
+        "interval": "15m", "risk_per_trade": 0.03, "max_position_pct": 0.50,
+        "max_open_positions": 4, "atr_trail_mult": 2.5, "rsi_oversold": 33,
+        "bounce_max_bars": 16, "bounce_risk_mult": 0.75, "bounce_body": 0.4,
+        "require_bull": False, "dd_brake": 0.15, "dd_halt": 0.30, "halt_days": 3,
+    },
+}
+PROFILE = os.environ.get("BOT_PROFILE", "sakin")
+CONFIG = {**BASE, **PROFILES[PROFILE], "profile": PROFILE}
+
+def set_profile(name):
+    global PROFILE
+    PROFILE = name
+    CONFIG.clear(); CONFIG.update({**BASE, **PROFILES[name], "profile": name})
+
 HOSTS = ["https://api.binance.com", "https://data-api.binance.vision"]
 INTERVAL_MS = {"15m": 900_000, "1h": 3600_000, "4h": 4 * 3600_000, "1d": 86400_000}
 
@@ -133,7 +148,7 @@ class Account:
         if dd >= cfg["dd_halt"]:
             # 7 gün (42 x 4s mum) bekle, sonra yeni zirve referansıyla devam et
             self.halt_since = getattr(self, "halt_since", None) or ts
-            if ts - self.halt_since < 3 * 86400_000: return None
+            if ts - self.halt_since < self.cfg["halt_days"] * 86400_000: return None
             self.peak, self.halt_since, dd = eq, None, 0
         risk = cfg["risk_per_trade"] * (0.5 if dd >= cfg["dd_brake"] else 1.0)
         if kind == "bounce": risk *= cfg["bounce_risk_mult"]
@@ -171,7 +186,7 @@ def step(acc, sym, bars, ind, i, prices):
         if p["kind"] == "trend":
             p["high"] = max(p["high"], c)
             p["stop"] = max(p["stop"], p["high"] - cfg["atr_trail_mult"] * a)
-            if c < e50 and c < p["entry"] * 0.995:
+            if c < e50 and c < p["entry"] * 0.995 or cfg["require_bull"] and e50 < e200 and c < e50:
                 acc.sell(ts, sym, c, "trend bozuldu")
         else:  # bounce
             target = p["entry"] + cfg["bounce_target_atr"] * p.get("atr", a)
@@ -182,10 +197,14 @@ def step(acc, sym, bars, ind, i, prices):
     # --- yeni giriş sinyalleri
     n = cfg["breakout_len"]
     prev_high = max(b[2] for b in bars[i - n:i])
-    # agresif: uzun vadeli trend şartı yok; kısa vadeli momentum yeterli
-    if c > prev_high and c > e50 and r < 80:
+    bull = c > e200 and e50 > e200
+    if cfg["require_bull"]:
+        go = bull and c > prev_high and r < 78
+    else:
+        go = c > prev_high and c > e50 and r < 80
+    if go:
         acc.buy(ts, sym, c, c - cfg["atr_stop_mult"] * a, "trend", prices)
-    elif r < cfg["rsi_oversold"] and c > o and c > l + 0.4 * (h - l):
+    elif r < cfg["rsi_oversold"] and c > o and c > l + cfg["bounce_body"] * (h - l):
         t = acc.buy(ts, sym, c, c - 1.5 * a, "bounce", prices)
         if t: acc.positions[sym]["atr"] = a
 
@@ -221,7 +240,7 @@ def save_trades(trades, path):
         w.writerows(trades)
 
 # ------------------------------------------------------------------ MODLAR
-def run_backtest(days, data=None):
+def run_backtest(days, data=None, trades_out="backtest_trades.csv"):
     cfg = CONFIG
     step_ms = INTERVAL_MS[cfg["interval"]]
     warm = 210 * step_ms
@@ -249,9 +268,11 @@ def run_backtest(days, data=None):
             e = acc.equity(prices); acc.peak = max(acc.peak, e); curve.append((ts, e))
     bh = sum(prices[s] / first_px[s] for s in first_px) / len(first_px) - 1
     report(acc, curve, cfg["start_balance"], bh)
-    if os.path.exists("backtest_trades.csv"): os.remove("backtest_trades.csv")
-    save_trades(acc.trades, "backtest_trades.csv")
-    print("İşlem listesi: backtest_trades.csv")
+    fees = sum(t["value_usdt"] * (cfg["fee"] + cfg["slippage"]) for t in acc.trades)
+    print(f"Tahmini toplam komisyon+kayma maliyeti: {fees:.2f} USDT")
+    if os.path.exists(trades_out): os.remove(trades_out)
+    save_trades(acc.trades, trades_out)
+    print("İşlem listesi:", trades_out)
     return acc, curve
 
 def load_state():
@@ -314,10 +335,14 @@ def show_status():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Binance demo trading botu (sanal 1000 USDT)")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    ap.add_argument("--profile", choices=list(PROFILES), default=None)
     b = sub.add_parser("backtest"); b.add_argument("--days", type=int, default=365)
+    b.add_argument("--out", default="backtest_trades.csv")
     p = sub.add_parser("paper"); p.add_argument("--once", action="store_true")
     sub.add_parser("status")
     a = ap.parse_args()
-    if a.cmd == "backtest": run_backtest(a.days)
+    if a.profile: set_profile(a.profile)
+    print(f"Profil: {CONFIG['profile']} ({CONFIG['interval']} mumlar, {len(CONFIG['symbols'])} coin)")
+    if a.cmd == "backtest": run_backtest(a.days, trades_out=a.out)
     elif a.cmd == "paper": run_paper(a.once)
     else: show_status()
