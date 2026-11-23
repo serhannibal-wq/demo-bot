@@ -1,0 +1,20 @@
+Profil: sakin (4h mumlar, 5 coin)
+Veri indiriliyor: BTCUSDT ...
+Veri indiriliyor: ETHUSDT ...
+Veri indiriliyor: SOLUSDT ...
+Veri indiriliyor: BNBUSDT ...
+Veri indiriliyor: XRPUSDT ...
+
+================ SONUÇ ================
+Başlangıç: 1000.00 USDT  ->  Bitiş: 971.60 USDT  (-2.84%)
+Maks. düşüş (drawdown): %3.8
+Kapanan işlem: 8  |  Kazanma oranı: %38
+Karşılaştırma - eşit ağırlıklı al-tut: -25.00%
+
+Aylık getiri:
+  2026-10:  +0.00%  
+  2026-11:  -2.84%  
+
+%15 hedefini tutturan ay: 0/2
+Tahmini toplam komisyon+kayma maliyeti: 5.27 USDT
+İşlem listesi: sonuclar/sakin_30g.csv
