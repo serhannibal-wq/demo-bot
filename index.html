@@ -47,7 +47,7 @@ pre,.scroll{overflow-x:auto}
 <header class="band">
   <div class="top"><span class="tag">DEMO · gerçek para yok</span><span class="mut" id="upd">Yükleniyor…</span></div>
   <h1 id="title">Demo hesap yükleniyor</h1>
-  <div class="mut">Binance spot · BTC ETH SOL BNB XRP DOGE AVAX LINK ADA · agresif mod · 15 dakikalık mumlar · bot 15 dakikada bir çalışır</div>
+  <div class="mut">Binance spot · BTC ETH SOL BNB XRP · sakin mod · 4 saatlik mumlar · bot 15 dakikada bir kontrol eder</div>
   <div class="kpis" id="kpis"></div>
   <div class="fig" id="figwrap"><svg id="chart" role="img" aria-label="Sermaye eğrisi"></svg></div>
   <div class="mut">Siyah: sermaye · gri kesikli: 1000 USDT başlangıç · kırmızı kesikli: bu ayın %15 hedefi</div>
@@ -55,7 +55,7 @@ pre,.scroll{overflow-x:auto}
 <main class="band" style="padding-top:0">
   <h2>Açık pozisyonlar</h2><div id="pos"></div>
   <h2>Alım-satım geçmişi ve kâr/zarar</h2><div class="kpis" id="summary" style="margin-top:0"></div><div class="scroll" id="trades"></div>
-  <p class="note">Bu bir deney panelidir, yatırım tavsiyesi değildir. Ayda %15 bir hedeftir, garanti değildir. Agresif modda kazanç da kayıp da büyür.</p>
+  <p class="note">Bu bir deney panelidir, yatırım tavsiyesi değildir. Ayda %15 bir hedeftir, garanti değildir. Sakin mod düşüş piyasasında çoğu zaman nakitte bekler.</p>
   <button id="refresh" type="button">Yenile</button>
 </main>
 <script>
@@ -111,8 +111,8 @@ async function load(){
   $('kpis').innerHTML=[
     [`<span class="${cls(mret)}">${pct(mret)}</span>`,`Bu ay · hedef +15%<div class="meter"><i style="width:${prog*100}%"></i></div>`],
     [fmt(st.cash)+' $','Nakit (USDT)'],
-    [Object.keys(pos).length+' / 4','Açık pozisyon'],
-    [`<span class="${dd>0.1?'neg':''}">${fmt(dd*100,1)}%</span>`,'Zirveden düşüş · %15 fren, %30 durdurma']
+    [Object.keys(pos).length+' / 3','Açık pozisyon'],
+    [`<span class="${dd>0.1?'neg':''}">${fmt(dd*100,1)}%</span>`,'Zirveden düşüş · %10 fren, %20 durdurma']
   ].map(k=>`<div class="kpi"><b>${k[0]}</b><span>${k[1]}</span></div>`).join('');
   const pr=Object.entries(pos);
   $('pos').innerHTML=pr.length?`<table class="stack"><thead><tr><th>Coin</th><th>Tür</th><th class="n">Miktar</th><th class="n">Giriş</th><th class="n">Şimdi</th><th class="n">Şu anki kâr/zarar</th><th class="n">Stop</th></tr></thead><tbody>${pr.map(([s,p])=>{const c=px[s]||p.entry,r=c/p.entry-1;return `<tr><td><b>${s.replace('USDT','')}</b></td><td>${p.kind==='trend'?'Trend':'Tepki'}</td><td class="n">${fmt(p.qty,5)}</td><td class="n">${fmt(p.entry,4)}</td><td class="n">${fmt(c,4)}</td><td class="n ${cls(r)}">${pct(r)} · ${fmt(p.qty*(c-p.entry))} $</td><td class="n">${fmt(p.stop,4)}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty">Açık pozisyon yok — bot nakitte bekliyor.</div>';
