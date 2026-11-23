@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Binance DEMO (paper trading) botu - sanal 1000 USDT ile.
+Binance DEMO (paper trading) botu - sanal 1000 USDT ile. AGRESİF MOD.
 GERÇEK EMİR GÖNDERMEZ. API anahtarı gerektirmez; sadece Binance'in
 herkese açık fiyat verisini (klines) okur.
 
@@ -17,26 +17,28 @@ from datetime import datetime, timezone
 # ------------------------------------------------------------------ AYARLAR
 CONFIG = {
     "start_balance": 1000.0,          # sanal USDT
-    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"],
-    "interval": "4h",
+    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+                "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "ADAUSDT"],
+    "interval": "15m",                # agresif mod: 15 dakikalık mumlar
     "fee": 0.001,                     # Binance spot %0.1 (her işlem)
     "slippage": 0.0005,               # %0.05 kayma varsayımı
-    "risk_per_trade": 0.015,          # işlem başı sermayenin %1.5'i riske edilir
-    "max_position_pct": 0.35,         # tek coine en fazla sermayenin %35'i
-    "max_open_positions": 3,
+    "risk_per_trade": 0.03,           # agresif: işlem başı sermayenin %3'ü riske edilir
+    "max_position_pct": 0.50,         # tek coine en fazla sermayenin %50'si
+    "max_open_positions": 4,
     "atr_stop_mult": 2.0,             # ilk stop = giriş - 2*ATR
-    "atr_trail_mult": 3.0,            # trend işlemlerinde iz süren stop
+    "atr_trail_mult": 2.5,            # trend işlemlerinde iz süren stop
     "breakout_len": 20,               # Donchian kırılım periyodu
-    "rsi_oversold": 25,
+    "rsi_oversold": 33,
     "bounce_target_atr": 2.0,
-    "bounce_max_bars": 12,            # tepki alımında en fazla 12 mum (2 gün) tut
-    "dd_brake": 0.10,                 # zirveden %10 düşüşte risk yarıya iner
-    "dd_halt": 0.20,                  # zirveden %20 düşüşte yeni işlem açılmaz
+    "bounce_max_bars": 16,            # tepki alımında en fazla 16 mum (4 saat) tut
+    "bounce_risk_mult": 0.75,
+    "dd_brake": 0.15,                 # zirveden %15 düşüşte risk yarıya iner
+    "dd_halt": 0.30,                  # zirveden %30 düşüşte 3 gün yeni işlem açılmaz
     "state_file": "demo_state.json",
     "trades_file": "demo_trades.csv",
 }
 HOSTS = ["https://api.binance.com", "https://data-api.binance.vision"]
-INTERVAL_MS = {"1h": 3600_000, "4h": 4 * 3600_000, "1d": 86400_000}
+INTERVAL_MS = {"15m": 900_000, "1h": 3600_000, "4h": 4 * 3600_000, "1d": 86400_000}
 
 # ------------------------------------------------------------------ VERİ
 def http_json(path, params):
@@ -131,10 +133,10 @@ class Account:
         if dd >= cfg["dd_halt"]:
             # 7 gün (42 x 4s mum) bekle, sonra yeni zirve referansıyla devam et
             self.halt_since = getattr(self, "halt_since", None) or ts
-            if ts - self.halt_since < 7 * 86400_000: return None
+            if ts - self.halt_since < 3 * 86400_000: return None
             self.peak, self.halt_since, dd = eq, None, 0
         risk = cfg["risk_per_trade"] * (0.5 if dd >= cfg["dd_brake"] else 1.0)
-        if kind == "bounce": risk *= 0.5            # karşı-trend işlem = yarım risk
+        if kind == "bounce": risk *= cfg["bounce_risk_mult"]
         fill = price * (1 + cfg["slippage"])
         per_unit = fill - stop
         if per_unit <= 0: return None
@@ -169,7 +171,7 @@ def step(acc, sym, bars, ind, i, prices):
         if p["kind"] == "trend":
             p["high"] = max(p["high"], c)
             p["stop"] = max(p["stop"], p["high"] - cfg["atr_trail_mult"] * a)
-            if c < e50 and c < p["entry"] * 0.995 or e50 < e200 and c < e50:
+            if c < e50 and c < p["entry"] * 0.995:
                 acc.sell(ts, sym, c, "trend bozuldu")
         else:  # bounce
             target = p["entry"] + cfg["bounce_target_atr"] * p.get("atr", a)
@@ -180,10 +182,10 @@ def step(acc, sym, bars, ind, i, prices):
     # --- yeni giriş sinyalleri
     n = cfg["breakout_len"]
     prev_high = max(b[2] for b in bars[i - n:i])
-    bull = c > e200 and e50 > e200
-    if bull and c > prev_high and r < 78:
+    # agresif: uzun vadeli trend şartı yok; kısa vadeli momentum yeterli
+    if c > prev_high and c > e50 and r < 80:
         acc.buy(ts, sym, c, c - cfg["atr_stop_mult"] * a, "trend", prices)
-    elif r < cfg["rsi_oversold"] and c > o and c > l + 0.5 * (h - l):
+    elif r < cfg["rsi_oversold"] and c > o and c > l + 0.4 * (h - l):
         t = acc.buy(ts, sym, c, c - 1.5 * a, "bounce", prices)
         if t: acc.positions[sym]["atr"] = a
 
@@ -284,7 +286,7 @@ def paper_tick(acc):
     hist_p = "equity_history.json"
     hist = json.load(open(hist_p, encoding="utf-8")) if os.path.exists(hist_p) else []
     hist.append({"t": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "equity": round(eq, 2)})
-    json.dump(hist[-3000:], open(hist_p, "w", encoding="utf-8"))
+    json.dump(hist[-20000:], open(hist_p, "w", encoding="utf-8"))
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     print(f"[{now}] Sermaye: {eq:.2f} USDT ({(eq/cfg['start_balance']-1)*100:+.2f}%) | "
           f"Nakit: {acc.cash:.2f} | Açık: {', '.join(acc.positions) or '-'}")
@@ -296,7 +298,7 @@ def run_paper(once=False):
         try: paper_tick(acc)
         except Exception as e: print("Hata (tekrar denenecek):", e)
         if once: break
-        time.sleep(15 * 60)   # 15 dakikada bir kontrol; yeni 4s mum kapanınca işlem yapar
+        time.sleep(5 * 60)    # 5 dakikada bir kontrol; yeni mum kapanınca işlem yapar
 
 def show_status():
     st = load_state()
