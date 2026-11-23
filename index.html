@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Demo Bot Paneli</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400;62..125,600;112,800&display=swap" rel="stylesheet">
+<style>
+/* VOICE: sakin, net, gazete grafik masası
+   IDEA: istasyon kalkış tablosu — büyük rakamlar, sert çizgiler
+   PICTURE: sermaye eğrisi, 1000 USDT ve %15 hedef çizgileriyle
+   COLOUR and TYPE: beyaz, siyah, sinyal kırmızısı, tek gri; Archivo
+   LAYOUT: sol kenara yaslı, kalın üst çizgi, rakamlar geniş sol sütunda */
+:root{color-scheme:light dark;--bg:light-dark(#fff,#0e0e0e);--ink:light-dark(#111,#f2f2f2);--mut:light-dark(#6b6b6b,#9a9a9a);--line:light-dark(#111,#f2f2f2);--soft:light-dark(#e6e6e6,#2a2a2a);--red:#e4002b;--up:light-dark(#0a7d3b,#3ecf7a)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Archivo,system-ui,sans-serif;overflow-x:clip}
+.band{padding:clamp(24px,4vw,56px) max(5vw,16px);max-width:1240px;margin:0 auto}
+header{border-top:10px solid var(--line)}
+.top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 24px;align-items:baseline}
+.tag{font-weight:600;color:var(--red)}
+.mut{color:var(--mut);font-size:14px}
+h1{font-size:clamp(32px,5vw,52px);line-height:1.05;margin:12px 0 4px;font-stretch:112%;font-weight:800;text-wrap:balance}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:0;border-top:2px solid var(--line);margin-top:24px}
+.kpi{padding:14px 16px 16px 0;border-bottom:1px solid var(--soft)}
+.kpi b{display:block;font-size:clamp(28px,3.6vw,40px);font-stretch:112%;font-weight:800;line-height:1.1;white-space:nowrap}
+.kpi>span{font-size:14px;color:var(--mut)}
+.pos{color:var(--up)}.neg{color:var(--red)}
+.meter{height:8px;background:var(--soft);margin-top:8px}.meter i{display:block;height:100%;background:var(--ink)}
+.fig{position:relative;min-height:340px;margin-top:8px}.fig>svg{position:absolute;inset:0;width:100%;height:100%}
+h2{font-size:22px;font-stretch:112%;font-weight:800;border-top:2px solid var(--line);padding-top:10px;margin:40px 0 8px}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th{text-align:left;font-weight:600;color:var(--mut);font-size:13px;border-bottom:1px solid var(--line);padding:6px 8px 6px 0}
+td{padding:8px 8px 8px 0;border-bottom:1px solid var(--soft);white-space:nowrap}
+td.n,th.n{text-align:right}
+.empty{padding:18px 0;color:var(--mut)}
+.note{border-left:4px solid var(--red);padding:8px 14px;margin-top:28px;font-size:15px}
+button{font:inherit;font-size:16px;min-height:44px;padding:0 18px;background:var(--ink);color:var(--bg);border:0;cursor:pointer}
+button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+pre,.scroll{overflow-x:auto}
+@media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:8em;text-align:start;white-space:normal}.stack td::before{content:attr(data-l);float:inline-start;width:7.5em;margin-inline-start:-8em;white-space:normal;color:var(--mut)}.stack td:empty{display:none}}
+</style>
+<script>new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;c.dataset.l=c.closest('table').rows[0].cells[i]?.textContent||''}}).observe(document,{childList:true,subtree:true})</script>
+</head>
+<body>
+<header class="band">
+  <div class="top"><span class="tag">DEMO · gerçek para yok</span><span class="mut" id="upd">Yükleniyor…</span></div>
+  <h1 id="title">Demo hesap yükleniyor</h1>
+  <div class="mut">Binance spot · BTC ETH SOL BNB XRP · 4 saatlik mumlar · bot her 4 saatte bir çalışır</div>
+  <div class="kpis" id="kpis"></div>
+  <div class="fig" id="figwrap"><svg id="chart" role="img" aria-label="Sermaye eğrisi"></svg></div>
+  <div class="mut">Siyah: sermaye · gri kesikli: 1000 USDT başlangıç · kırmızı kesikli: bu ayın %15 hedefi</div>
+</header>
+<main class="band" style="padding-top:0">
+  <h2>Açık pozisyonlar</h2><div id="pos"></div>
+  <h2>İşlem geçmişi</h2><div class="scroll" id="trades"></div>
+  <p class="note">Bu bir deney panelidir, yatırım tavsiyesi değildir. Ayda %15 bir hedeftir, garanti değildir; bot ayı piyasasında çoğu zaman nakitte bekler.</p>
+  <button id="refresh" type="button">Yenile</button>
+</main>
+<script>
+{
+const $=id=>document.getElementById(id);
+const fmt=(v,d=2)=>Number(v).toLocaleString('tr-TR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=v=>(v>=0?'+':'')+fmt(v*100,2)+'%';
+const cls=v=>v>=0?'pos':'neg';
+const get=async(f,t)=>{try{const r=await fetch(f+'?v='+Date.now());if(!r.ok)return null;return t?await r.text():await r.json()}catch(e){return null}};
+let hist=[],monthStart=null,start=1000;
+
+function parseCSV(txt){
+  if(!txt)return[];const L=txt.trim().split(/\r?\n/);const h=L.shift().split(',');
+  return L.map(l=>{const c=l.split(',');const o={};h.forEach((k,i)=>o[k]=c[i]);return o});
+}
+function draw(){
+  const s=$('chart'),W=s.clientWidth,H=s.clientHeight;
+  if(!hist.length){s.innerHTML=`<text x="0" y="40" fill="currentColor" font-size="16">Henüz veri yok — bot ilk turunu çalıştırınca burada çizgi belirecek.</text>`;return}
+  const pts=hist.map(h=>[Date.parse(h.t),h.equity]);
+  const target=monthStart?monthStart*1.15:null;
+  const ys=pts.map(p=>p[1]).concat([start]).concat(target?[target]:[]);
+  let lo=Math.min(...ys),hi=Math.max(...ys);const pad=(hi-lo)*0.12||20;lo-=pad;hi+=pad;
+  const x0=pts[0][0],x1=Math.max(pts[pts.length-1][0],x0+1);
+  const L=W<520?44:64,R=12,T=12,B=28;
+  const X=t=>L+(t-x0)/(x1-x0)*(W-L-R),Y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+  const ticks=[];for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4;ticks.push(`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--soft)"/><text x="${L-8}" y="${Y(v)+4}" text-anchor="end" font-size="12" fill="var(--mut)">${fmt(v,0)}</text>`)}
+  const line=pts.map((p,i)=>(i?'L':'M')+X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1)).join('');
+  const d0=new Date(x0),d1=new Date(x1),df=d=>d.toLocaleDateString('tr-TR',{day:'numeric',month:'short'});
+  s.innerHTML=ticks.join('')+
+   `<line x1="${L}" x2="${W-R}" y1="${Y(start)}" y2="${Y(start)}" stroke="var(--mut)" stroke-dasharray="4 4"/>`+
+   (target?`<line x1="${L}" x2="${W-R}" y1="${Y(target)}" y2="${Y(target)}" stroke="var(--red)" stroke-dasharray="6 4" stroke-width="1.5"/>`:'')+
+   `<path d="${line}" fill="none" stroke="var(--ink)" stroke-width="2.5" stroke-linejoin="round"/>`+
+   (pts.length===1?`<circle cx="${X(x0)}" cy="${Y(pts[0][1])}" r="4" fill="var(--ink)"/>`:'')+
+   `<text x="${L}" y="${H-6}" font-size="12" fill="var(--mut)">${df(d0)}</text><text x="${W-R}" y="${H-6}" text-anchor="end" font-size="12" fill="var(--mut)">${df(d1)}</text>`;
+}
+const ro=new ResizeObserver(draw);ro.observe($('figwrap'));
+
+async function load(){
+  const [st,h,tr]=await Promise.all([get('demo_state.json'),get('equity_history.json'),get('demo_trades.csv',true)]);
+  hist=h||[];
+  if(!st){$('title').textContent='Bot henüz çalışmadı';$('upd').textContent='Actions sekmesinden ilk turu başlat';$('kpis').innerHTML='';$('pos').innerHTML='<div class="empty">Veri yok.</div>';$('trades').innerHTML='';draw();return}
+  start=st.start_balance||1000;
+  const px=st.prices||{},pos=st.positions||{};
+  let eq=st.cash;for(const[s,p]of Object.entries(pos))eq+=p.qty*(px[s]||p.entry);
+  const now=new Date(),mk=now.toISOString().slice(0,7);
+  const before=hist.filter(x=>x.t.slice(0,7)<mk);
+  monthStart=before.length?before[before.length-1].equity:(hist[0]?.equity??start);
+  const mret=eq/monthStart-1,tot=eq/start-1,dd=1-eq/Math.max(st.peak||eq,eq);
+  const prog=Math.max(0,Math.min(1,mret/0.15));
+  $('title').innerHTML=`Demo hesap: ${fmt(eq)} USDT <span class="${cls(tot)}">(${pct(tot)})</span>`;
+  $('upd').textContent='Son güncelleme: '+new Date(st.updated).toLocaleString('tr-TR',{dateStyle:'medium',timeStyle:'short'});
+  $('kpis').innerHTML=[
+    [`<span class="${cls(mret)}">${pct(mret)}</span>`,`Bu ay · hedef +15%<div class="meter"><i style="width:${prog*100}%"></i></div>`],
+    [fmt(st.cash)+' $','Nakit (USDT)'],
+    [Object.keys(pos).length+' / 3','Açık pozisyon'],
+    [`<span class="${dd>0.1?'neg':''}">${fmt(dd*100,1)}%</span>`,'Zirveden düşüş · %10 fren, %20 durdurma']
+  ].map(k=>`<div class="kpi"><b>${k[0]}</b><span>${k[1]}</span></div>`).join('');
+  const pr=Object.entries(pos);
+  $('pos').innerHTML=pr.length?`<table class="stack"><thead><tr><th>Coin</th><th>Tür</th><th class="n">Miktar</th><th class="n">Giriş</th><th class="n">Şimdi</th><th class="n">K/Z</th><th class="n">Stop</th></tr></thead><tbody>${pr.map(([s,p])=>{const c=px[s]||p.entry,r=c/p.entry-1;return `<tr><td><b>${s.replace('USDT','')}</b></td><td>${p.kind==='trend'?'Trend':'Tepki'}</td><td class="n">${fmt(p.qty,5)}</td><td class="n">${fmt(p.entry,4)}</td><td class="n">${fmt(c,4)}</td><td class="n ${cls(r)}">${pct(r)} · ${fmt(p.qty*(c-p.entry))} $</td><td class="n">${fmt(p.stop,4)}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty">Açık pozisyon yok — bot nakitte bekliyor.</div>';
+  const t=parseCSV(tr).reverse().slice(0,100);
+  const why={trend:'Trend kırılımı',bounce:'Aşırı satış tepkisi',stop:'Stop',hedef:'Hedef','süre doldu':'Süre doldu','trend bozuldu':'Trend bozuldu'};
+  $('trades').innerHTML=t.length?`<table class="stack"><thead><tr><th>Zaman (UTC)</th><th>Coin</th><th>İşlem</th><th class="n">Fiyat</th><th class="n">Tutar</th><th>Neden</th><th class="n">K/Z</th></tr></thead><tbody>${t.map(x=>{const p=x.pnl_usdt===''||x.pnl_usdt==null?null:+x.pnl_usdt;return `<tr><td>${x.time}</td><td><b>${(x.symbol||'').replace('USDT','')}</b></td><td>${x.side==='BUY'?'Alış':'Satış'}</td><td class="n">${fmt(x.price,4)}</td><td class="n">${fmt(x.value_usdt)} $</td><td>${why[x.reason]||x.reason}</td><td class="n ${p==null?'':cls(p)}">${p==null?'':(p>=0?'+':'')+fmt(p)+' $'}</td></tr>`}).join('')}</tbody></table>`:'<div class="empty">Henüz işlem yok.</div>';
+  draw();
+}
+$('refresh').addEventListener('click',load);
+load();setInterval(load,5*60*1000);
+}
+</script>
+</body>
+</html>
